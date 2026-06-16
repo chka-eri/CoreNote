@@ -1,290 +1,219 @@
-import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  FlatList,
+  Modal,
+  Pressable,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
+const STORAGE_KEY = '@CoreNote:notes';
 
-type NoteItem = {
-  id: number;
-  text: string;
-  done: boolean;
-  pinned: boolean;
+type Note = {
+  id: string;
+  title: string;
+  body: string;
 };
 
-const MAX_NOTE_LENGTH = 180;
-
 export default function HomeScreen() {
-  const [count, setCount] = useState(0);
-  const [draft, setDraft] = useState('');
-  const [notes, setNotes] = useState<NoteItem[]>([]);
-  const [search, setSearch] = useState('');
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editingText, setEditingText] = useState('');
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [selectedNote, setSelectedNote] = useState<Note | null>(null);
+  const [isModalVisible, setIsModalVisible] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editBody, setEditBody] = useState('');
 
-  const totalChars = useMemo(
-    () => notes.reduce((sum, note) => sum + note.text.length, 0),
-    [notes]
-  );
+  useEffect(() => {
+    AsyncStorage.getItem(STORAGE_KEY).then((stored: string | null) => {
+      if (stored) setNotes(JSON.parse(stored));
+    });
+  }, []);
 
-  const remainingChars = MAX_NOTE_LENGTH - draft.length;
-
-  const visibleNotes = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    const filtered = query
-      ? notes.filter((note) => note.text.toLowerCase().includes(query))
-      : notes;
-
-    return [...filtered].sort((a, b) => Number(b.pinned) - Number(a.pinned));
-  }, [notes, search]);
-
-  const completedCount = useMemo(() => notes.filter((note) => note.done).length, [notes]);
+  const persist = useCallback(async (updated: Note[]) => {
+    setNotes(updated);
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  }, []);
 
   const addNote = () => {
-    const text = draft.trim();
-    if (!text) {
-      return;
-    }
-
-    setNotes((prev) => [
-      {
-        id: Date.now(),
-        text,
-        done: false,
-        pinned: false,
-      },
-      ...prev,
-    ]);
-    setDraft('');
+    const trimmedTitle = title.trim();
+    const trimmedBody = body.trim();
+    if (!trimmedTitle || !trimmedBody) return;
+    const note = { id: Date.now().toString(), title: trimmedTitle, body: trimmedBody };
+    persist([note, ...notes]);
+    setTitle('');
+    setBody('');
   };
 
-  const toggleDone = (id: number) => {
-    setNotes((prev) =>
-      prev.map((note) => (note.id === id ? { ...note, done: !note.done } : note))
+  const deleteNote = (id: string) => {
+    persist(notes.filter((n) => n.id !== id));
+    if (selectedNote?.id === id) closeModal();
+  };
+
+  const openNote = (note: Note) => {
+    setSelectedNote(note);
+    setEditTitle(note.title);
+    setEditBody(note.body);
+    setIsModalVisible(true);
+  };
+
+  const closeModal = () => {
+    setIsModalVisible(false);
+    setSelectedNote(null);
+    setEditTitle('');
+    setEditBody('');
+  };
+
+  const saveEdit = () => {
+    const trimmedTitle = editTitle.trim();
+    const trimmedBody = editBody.trim();
+    if (!selectedNote || !trimmedTitle || !trimmedBody) return;
+    persist(
+      notes.map((n) =>
+        n.id === selectedNote.id ? { ...n, title: trimmedTitle, body: trimmedBody } : n
+      )
     );
+    closeModal();
   };
 
-  const togglePinned = (id: number) => {
-    setNotes((prev) =>
-      prev.map((note) => (note.id === id ? { ...note, pinned: !note.pinned } : note))
-    );
-  };
-
-  const deleteNote = (id: number) => {
-    setNotes((prev) => prev.filter((note) => note.id !== id));
-    if (editingId === id) {
-      setEditingId(null);
-      setEditingText('');
-    }
-  };
-
-  const startEditing = (note: NoteItem) => {
-    setEditingId(note.id);
-    setEditingText(note.text);
-  };
-
-  const saveEdit = (id: number) => {
-    const text = editingText.trim();
-    if (!text) {
-      return;
-    }
-
-    setNotes((prev) => prev.map((note) => (note.id === id ? { ...note, text } : note)));
-    setEditingId(null);
-    setEditingText('');
-  };
-
-  const clearAllNotes = () => {
-    setNotes([]);
-    setEditingId(null);
-    setEditingText('');
-  };
+  const hasDraft = title.trim().length > 0 && body.trim().length > 0;
 
   return (
-    <ScrollView contentContainerStyle={styles.content}>
-      <ThemedView style={styles.section}>
-        <ThemedText type="title">CoreNote</ThemedText>
-      </ThemedView>
+    <SafeAreaView style={styles.container}>
+      <Text style={styles.header}>CoreNote</Text>
 
-      <ThemedView style={styles.section}>
-        <ThemedText type="subtitle">Counter</ThemedText>
-        <ThemedText style={styles.counterValue}>{count}</ThemedText>
-        <View style={styles.row}>
-          <Pressable style={styles.button} onPress={() => setCount((value) => value - 1)}>
-            <ThemedText type="defaultSemiBold">-1</ThemedText>
-          </Pressable>
-          <Pressable style={styles.button} onPress={() => setCount((value) => value + 1)}>
-            <ThemedText type="defaultSemiBold">+1</ThemedText>
-          </Pressable>
-          <Pressable style={styles.button} onPress={() => setCount(0)}>
-            <ThemedText type="defaultSemiBold">Reset</ThemedText>
-          </Pressable>
-        </View>
-      </ThemedView>
-
-      <ThemedView style={styles.section}>
-        <ThemedText type="subtitle">Quick Notes</ThemedText>
-
+      <View style={styles.form}>
         <TextInput
-          value={draft}
-          onChangeText={(text) => setDraft(text.slice(0, MAX_NOTE_LENGTH))}
-          placeholder="Write a short note..."
-          style={styles.input}
+          value={title}
+          onChangeText={setTitle}
+          placeholder="Note title"
+          placeholderTextColor="#8f95a3"
+          style={styles.titleInput}
+          maxLength={80}
         />
-        <ThemedText style={styles.helperText}>{remainingChars} characters left</ThemedText>
-
-        <Pressable style={styles.addButton} onPress={addNote}>
-          <ThemedText type="defaultSemiBold">Add Note</ThemedText>
+        <TextInput
+          value={body}
+          onChangeText={setBody}
+          placeholder="Write your note..."
+          placeholderTextColor="#8f95a3"
+          style={styles.bodyInput}
+          multiline
+          textAlignVertical="top"
+        />
+        <Pressable
+          onPress={addNote}
+          style={({ pressed }) => [
+            styles.addButton,
+            !hasDraft && styles.addButtonDisabled,
+            pressed && hasDraft && styles.buttonPressed,
+          ]}>
+          <Text style={styles.addButtonText}>Add Note</Text>
         </Pressable>
+      </View>
 
-        <TextInput
-          value={search}
-          onChangeText={setSearch}
-          placeholder="Search notes"
-          style={styles.input}
-        />
-
-        <ThemedText>
-          {notes.length} notes • {totalChars} total characters • {completedCount} completed
-        </ThemedText>
-
-        {!!notes.length && (
-          <Pressable style={styles.clearButton} onPress={clearAllNotes}>
-            <ThemedText type="defaultSemiBold">Clear All</ThemedText>
+      <FlatList
+        data={notes}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.listContainer}
+        ListEmptyComponent={
+          <Text style={styles.emptyText}>No notes yet. Add your first one above.</Text>
+        }
+        renderItem={({ item }) => (
+          <Pressable
+            onPress={() => openNote(item)}
+            style={({ pressed }) => [styles.noteCard, pressed && styles.cardPressed]}>
+            <View style={styles.noteContent}>
+              <Text style={styles.noteTitle}>{item.title}</Text>
+              <Text style={styles.notePreview} numberOfLines={2} ellipsizeMode="tail">
+                {item.body}
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => deleteNote(item.id)}
+              style={({ pressed }) => [styles.deleteButtonSmall, pressed && styles.buttonPressed]}>
+              <Text style={styles.deleteButtonText}>Delete</Text>
+            </Pressable>
           </Pressable>
         )}
+      />
 
-        {visibleNotes.map((note) => (
-          <ThemedView key={note.id} style={[styles.noteCard, note.pinned && styles.notePinned]}>
-            <View style={styles.noteHeader}>
-              <ThemedText type="defaultSemiBold">{note.pinned ? '📌 Pinned' : 'Note'}</ThemedText>
-              <View style={styles.row}>
-                <Pressable style={styles.smallButton} onPress={() => togglePinned(note.id)}>
-                  <ThemedText>{note.pinned ? 'Unpin' : 'Pin'}</ThemedText>
-                </Pressable>
-                <Pressable style={styles.smallButton} onPress={() => toggleDone(note.id)}>
-                  <ThemedText>{note.done ? 'Undo' : 'Done'}</ThemedText>
-                </Pressable>
-              </View>
+      <Modal animationType="slide" transparent visible={isModalVisible} onRequestClose={closeModal}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalHeader}>Edit Note</Text>
+            <TextInput
+              value={editTitle}
+              onChangeText={setEditTitle}
+              placeholder="Note title"
+              placeholderTextColor="#8f95a3"
+              style={styles.titleInput}
+            />
+            <TextInput
+              value={editBody}
+              onChangeText={setEditBody}
+              placeholder="Note details"
+              placeholderTextColor="#8f95a3"
+              style={[styles.bodyInput, styles.modalBodyInput]}
+              multiline
+              textAlignVertical="top"
+            />
+            <View style={styles.modalActions}>
+              <Pressable
+                onPress={saveEdit}
+                style={({ pressed }) => [styles.modalButtonPrimary, pressed && styles.buttonPressed]}>
+                <Text style={styles.modalButtonPrimaryText}>Save</Text>
+              </Pressable>
+              <Pressable
+                onPress={closeModal}
+                style={({ pressed }) => [styles.modalButtonSecondary, pressed && styles.buttonPressed]}>
+                <Text style={styles.modalButtonSecondaryText}>Close</Text>
+              </Pressable>
             </View>
-
-            {editingId === note.id ? (
-              <>
-                <TextInput
-                  value={editingText}
-                  onChangeText={setEditingText}
-                  style={styles.input}
-                  multiline
-                />
-                <View style={styles.row}>
-                  <Pressable style={styles.smallButton} onPress={() => saveEdit(note.id)}>
-                    <ThemedText>Save</ThemedText>
-                  </Pressable>
-                  <Pressable
-                    style={styles.smallButton}
-                    onPress={() => {
-                      setEditingId(null);
-                      setEditingText('');
-                    }}>
-                    <ThemedText>Cancel</ThemedText>
-                  </Pressable>
-                </View>
-              </>
-            ) : (
-              <>
-                <ThemedText style={note.done ? styles.completedText : undefined}>{note.text}</ThemedText>
-                <View style={styles.row}>
-                  <Pressable style={styles.smallButton} onPress={() => startEditing(note)}>
-                    <ThemedText>Edit</ThemedText>
-                  </Pressable>
-                  <Pressable style={styles.smallButton} onPress={() => deleteNote(note.id)}>
-                    <ThemedText>Delete</ThemedText>
-                  </Pressable>
-                </View>
-              </>
+            {selectedNote && (
+              <Pressable
+                onPress={() => deleteNote(selectedNote.id)}
+                style={({ pressed }) => [styles.modalDeleteButton, pressed && styles.buttonPressed]}>
+                <Text style={styles.deleteButtonText}>Delete</Text>
+              </Pressable>
             )}
-          </ThemedView>
-        ))}
-      </ThemedView>
-    </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  content: {
-    gap: 20,
-    padding: 20,
-    paddingBottom: 40,
-  },
-  section: {
-    borderRadius: 12,
-    gap: 10,
-    padding: 14,
-  },
-  counterValue: {
-    fontSize: 32,
-    fontWeight: '700',
-  },
-  row: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  button: {
-    borderColor: '#999',
-    borderRadius: 8,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  input: {
-    borderColor: '#999',
-    borderRadius: 8,
-    borderWidth: 1,
-    minHeight: 42,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  helperText: {
-    opacity: 0.7,
-  },
-  addButton: {
-    alignItems: 'center',
-    borderColor: '#999',
-    borderRadius: 8,
-    borderWidth: 1,
-    paddingVertical: 10,
-  },
-  clearButton: {
-    alignItems: 'center',
-    borderColor: '#999',
-    borderRadius: 8,
-    borderWidth: 1,
-    paddingVertical: 8,
-  },
-  noteCard: {
-    borderColor: '#777',
-    borderRadius: 8,
-    borderWidth: 1,
-    gap: 6,
-    padding: 10,
-  },
-  notePinned: {
-    borderColor: '#d7a100',
-  },
-  noteHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  smallButton: {
-    borderColor: '#999',
-    borderRadius: 8,
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  completedText: {
-    opacity: 0.6,
-    textDecorationLine: 'line-through',
-  },
+  container: { flex: 1, backgroundColor: '#f3f5f9', paddingHorizontal: 18, paddingTop: 14 },
+  header: { fontSize: 30, fontWeight: '700', color: '#151927', marginBottom: 16 },
+  form: { backgroundColor: '#ffffff', borderRadius: 14, padding: 14, marginBottom: 16 },
+  titleInput: { borderWidth: 1, borderColor: '#d7dbe3', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, color: '#151927', backgroundColor: '#fbfcff' },
+  bodyInput: { borderWidth: 1, borderColor: '#d7dbe3', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, minHeight: 90, marginTop: 10, color: '#151927', backgroundColor: '#fbfcff' },
+  addButton: { marginTop: 12, backgroundColor: '#3b63ff', paddingVertical: 12, borderRadius: 10, alignItems: 'center' },
+  addButtonDisabled: { backgroundColor: '#aebaf5' },
+  addButtonText: { color: '#ffffff', fontSize: 16, fontWeight: '600' },
+  listContainer: { paddingBottom: 24 },
+  emptyText: { textAlign: 'center', color: '#75809a', marginTop: 24 },
+  noteCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#ffffff', borderRadius: 14, padding: 14, marginBottom: 10 },
+  noteContent: { flex: 1, marginRight: 10 },
+  noteTitle: { fontSize: 16, fontWeight: '700', color: '#151927', marginBottom: 4 },
+  notePreview: { fontSize: 14, color: '#55607a', lineHeight: 20 },
+  deleteButtonSmall: { backgroundColor: '#ffebee', borderRadius: 8, paddingVertical: 7, paddingHorizontal: 10 },
+  deleteButtonText: { color: '#bf1e2e', fontWeight: '600', fontSize: 13 },
+  modalOverlay: { flex: 1, justifyContent: 'center', backgroundColor: 'rgba(0, 0, 0, 0.3)', padding: 18 },
+  modalCard: { backgroundColor: '#ffffff', borderRadius: 16, padding: 16 },
+  modalHeader: { fontSize: 22, fontWeight: '700', color: '#151927', marginBottom: 12 },
+  modalBodyInput: { minHeight: 130 },
+  modalActions: { flexDirection: 'row', marginTop: 14, gap: 10 },
+  modalButtonPrimary: { flex: 1, backgroundColor: '#3b63ff', paddingVertical: 11, borderRadius: 10, alignItems: 'center' },
+  modalButtonPrimaryText: { color: '#ffffff', fontWeight: '600', fontSize: 15 },
+  modalButtonSecondary: { flex: 1, backgroundColor: '#e8edf8', paddingVertical: 11, borderRadius: 10, alignItems: 'center' },
+  modalButtonSecondaryText: { color: '#27314a', fontWeight: '600', fontSize: 15 },
+  modalDeleteButton: { marginTop: 12, alignSelf: 'center', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, backgroundColor: '#ffebee' },
+  buttonPressed: { opacity: 0.82 },
+  cardPressed: { transform: [{ scale: 0.99 }] },
 });
